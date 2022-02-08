@@ -9,10 +9,10 @@ This is the first and only *individual* (as opposed to *team*) project this seme
 
 Term: Spring 2022
 
-+ Projec title: Lorem ipsum dolor sit amet
-+ This project is conducted by [your name]
++ Projec title: How does philosophy evolves
++ This project is conducted by Jingwei Liao
 
-+ Project summary: [a short summary] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
++ Project summary: This is the R notebook of the first project which will seek out some underlying stories behind the history of Philosophy. By applying data mining, statistical analysis and visualization technique in R environment, we had our preliminary exploration in the evolution of philosophy, including the changes in philosophers’ preferences for sentence length, main topics that philosophers discuss in different periods, the sentiment changes in the philosophy.The data of can be found on [History of Philosophy](https://www.kaggle.com/kouroshalizadeh/history-of-philosophy/version/3).
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
 
