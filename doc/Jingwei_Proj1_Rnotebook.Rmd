@@ -1,0 +1,466 @@
+---
+title: "How does philosophy evolves"
+author: "Jingwei Liao"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is the R notebook of the first project which will seek out some underlying stories behind the history of Philosophy. By applying data mining, statistical analysis and visualization technique in R environment, we had our preliminary exploration in **the evolution of philosophy**, including the changes in philosophers' preferences for sentence length, main topics that philosophers discuss in different periods, the sentiment changes in the philosophy. 
+
+Most of the code in this notebook has been hidden, the whole notebook can be viewed in another notebook file. 
+
+The data of this notebook can be found on [History of Philosophy](https://www.kaggle.com/kouroshalizadeh/history-of-philosophy/version/3).
+
+# Step 0: Initialize the Environment
+
+```{r, message=FALSE, warning=FALSE}
+packages.used=c("tm", "wordcloud", "RColorBrewer", 
+                "tidyverse", "tidytext", "knitr",
+                "DT", "htmlwidgets", "cowplots")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE,
+                   repos='http://cran.us.r-project.org')
+}
+
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+library(tidyverse)
+library(tidytext)
+library(knitr)
+library(DT)
+library(htmlwidgets)
+library(cowplot)
+
+theme_set(theme_light())
+color1 <- brewer.pal(9, "YlGnBu")
+color2 <- brewer.pal(9, "Blues")
+```
+
+This notebook was prepared with the following environmental settings.
+
+```{r}
+print(R.version)
+```
+
+# Step 1: Read in the Data
+
+The first 6 lines of the dataset shows as follows:
+```{r}
+data <- read.csv('../data/philosophy_data.csv')
+head(data)
+```
+
+# Step 2: Explotory Data Analysis
+
+## 1. Overview of the dataset
+
+- **Data size**
+```{r}
+dim(data)
+```
+
+We can see that the dataset consists of **11 columns** and **over 36w rows**. According to the description of the dataset on Kaggle, this dataset contains over 300,000 sentences from over 50 texts spanning 10 major schools of philosophy, which means that each row represents a sentence in a text.
+
+- **Columns**
+
+```{r}
+colnames(data)
+```
+
+- **Feature** `school`
+```{r}
+unique(data$school)
+```
+
+```{r, fig.align='center'}
+ggplot(data, aes(school)) +
+  geom_bar(fill = color2[6]) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+- **Feature** `author`
+
+```{r}
+unique(data$author)
+```
+
+```{r, fig.align='center'}
+ggplot(data, aes(author)) +
+  geom_bar(fill = color2[6]) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+- **Feature** `Publication date range`
+
+```{r}
+sprintf("The history of philosophy in this dataset ranges from %d to %d", min(data$original_publication_date), max(data$original_publication_date))
+```
+
+
+## 2. Sentence Length(by chr & word)
+
+
+Sentence length can be presented as `character length` or `word length`. Since the data contains the character length in the column `sentence_length` and sentences are already tokenized, we just need to count the number of tokens in each sentence and add column `word_sentence`. Then we calculate the total sentence length and average sentence length for each text. The results are as below.
+
+```{r}
+data_new <- data %>%
+  mutate(word_length = str_count(tokenized_txt, '\\w+'))
+
+sent.len.df <- data_new %>% 
+  select(school, author, title, sentence_length, word_length) %>% 
+  group_by(school, author, title) %>% 
+  summarize(n_chr = sum(sentence_length), n_word = sum(word_length),
+            ave_chr = round(mean(sentence_length),2), ave_word = round(mean(word_length),2), .groups = 'drop')
+
+datatable(sent.len.df, options = list(pageLength=5))
+```
+
+To view from a more concrete point of view, the average sentence length(word) for each school is also plotted below. We can see that **capitalism** and **empiricism** use more lengthy sentences, while **analytic** and **nietzsche** use more shorter sentences.
+
+```{r, fig.align='center'}
+g.school <- data_new %>% 
+  select(school, sentence_length, word_length) %>% 
+  group_by(school) %>% 
+  summarize(ave_word = round(mean(word_length), 1), .groups = 'drop') %>%
+  arrange(desc(ave_word)) %>%
+  ggplot(aes(x = reorder(school, ave_word), y = ave_word)) +
+  geom_bar(stat = "identity", fill = "#082E54") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  labs(title = "Average sentence length(word) for each school",
+       x = "School", y = "Average sentence length(word)") +
+  geom_text(aes(label=ave_word),hjust = 0.5, vjust = 1.5, color="white", size=4)
+
+g.school
+```
+
+By and large, the distribution of the sentence length follows a normal distribution.
+
+```{r, warning=FALSE, fig.align='center'}
+g.chr <- data_new %>%
+  select(sentence_length) %>% 
+  ggplot(aes(log10(sentence_length)))+
+  geom_histogram(bins = 50, color="black")+
+  labs(title= "Sentence length distribution(Character)",
+       x= "log10(Character sentence length)",
+       y= "Frequency") +
+  theme(plot.title = element_text(size = 12),
+        axis.text = element_text(size = 8))
+
+g.word <- data_new %>%
+  select(word_length) %>% 
+  ggplot(aes(log10(word_length)))+
+  geom_histogram(bins = 50, color= "black")+
+  labs(title= "Sentence length distribution(Word)",
+       x= "log10(Word sentence length)",
+       y= "Frequency") +
+  theme(plot.title = element_text(size = 12),
+        axis.text = element_text(size = 8))
+
+plot_grid(g.chr, g.word, ncol = 2)
+```
+
+# Step 3: Data Analysis - Philosophy Evolution
+
+Now we are interested in how Philosophy has developed over time. The scholar has divided philosophy into four periods: ancient(700 B.C -500 A.D.), medieval(6th-16th Century), modern(16th-18th Century), contemporary(19th-21st Century), thus I applied this division to our dataset, it consists of three pieces, **Ancient Philosophy**, **Modern Philosophy** and **Contemporary Philosophy**, which may indicate their characteristic change.
+
+```{r}
+ancient_data <- data_new %>%
+  filter(original_publication_date == -350 | original_publication_date == -320)
+modern_data <- data_new %>%
+  filter(original_publication_date > 1600 & original_publication_date <= 1800)
+contemporary_data <- data_new %>%
+  filter(original_publication_date > 1800)
+```
+
+We identify the specific schools in each period and count the number of works in each school. As the plot shows, the philosophy schools are more diversified as the time went by, changing from 2 schools to 8 schools. This is in line with the normal thinking. With the transition in times and the development of science, people's way of thinking has gradually changing from single to multiple. Naturally, there will be more schools of philosophy today and in the future. Aside, this conclusion also depends on the assumption that this dataset contains the most schools in the history of philosophy.
+
+```{r, fig.align='center'}
+ancient_school=ancient_data%>%
+  group_by(school)%>%
+  summarize(Counts=n())%>%
+  mutate(School=fct_reorder(school,(Counts)))%>%
+  ggplot(aes(x=School,y=Counts))+
+  geom_bar(stat="identity",fill = color2[5])+
+  labs(title="Ancient") +
+  theme(plot.title = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+modern_school=modern_data%>%
+  group_by(school)%>%
+  summarize(Counts=n())%>%
+  mutate(School=fct_reorder(school,(Counts)))%>%
+  ggplot(aes(x=School,y=Counts))+
+  geom_bar(stat="identity",fill = color2[7])+
+  labs(title="Modern") +
+  theme(plot.title = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+contemporary_school=contemporary_data%>%
+  group_by(school)%>%
+  summarize(Counts=n())%>%
+  mutate(School=fct_reorder(school,(Counts)))%>%
+  ggplot(aes(x=School,y=Counts))+
+  geom_bar(stat="identity", fill = color2[9])+
+  labs(title="Contemporary") +
+  theme(plot.title = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+plot_grid(ancient_school, modern_school, contemporary_school, ncol = 3, align = "h")
+```
+
+The next thing we want to explore is that can we identify the times' characteristic by finding the characteristic of the philosophy schools in that time. Philosophy represents people's most firmly-held beliefs, and how does this kind of beliefs evolved? That is the question we want to explore.
+
+## 1. Changes in philosophers' preferences for sentence length
+With the sentence length analysis before, let's first kook at how does the sentence length evolves with the time.
+
+```{r, fig.align='center'}
+data_new2 <- data_new %>%
+  mutate(period = if_else(original_publication_date == -350 | original_publication_date == -320, "ancient", 
+                          if_else(original_publication_date > 1600 & original_publication_date <= 1800, "modern", "contemporary"))) %>%
+  mutate(period = ordered(period, levels = c("ancient", "modern", "contemporary")))
+
+len_period_evolve <- data_new2 %>%
+  group_by(period) %>%
+  summarize(ave_word = round(mean(word_length),1)) %>%
+  ggplot(aes(x=period, y=ave_word))+
+  geom_bar(aes(fill = period), stat="identity", show.legend = FALSE)+
+  labs(title="The average sentence length in different periods", x= "Period", 
+    y= "Average number of words")+
+  geom_text(aes(label=ave_word), hjust=0.5, vjust = 1.5,color="white", size=4) +
+  scale_fill_brewer()
+
+len_period_evolve
+```
+
+We can really find that in the modern time, the philosophers prefer longer sentences while in both ancient and contemporary times, the philosophers prefer shorter sentences. *Generally, the whole pattern changes from simplicity to complexity and finally returns to simplicity.* This phenomenon may relate to some other factors like society background, political background, cultural background and so on, and this should be discovered by professional scholars.
+
+We can break down into more detailed category which is schools in different periods. From the plot below, we can find some interesting things. First of all, for two schools in ancient times, `plato` and `ariatotal`, their sentence length differs a lot. Secondly, `feminism` in two different times also differs a lot. For those schools that exist in different periods including `feminism`, `capitlism`, `german_idealism`, we can research more into them and that research may bring us something new indicating how the times changed.
+
+```{r, fig.align='center'}
+len_school_evolve <- data_new2 %>%
+  mutate(school = if_else(school %in% c("capitalism", "german_idealism", "feminism") & period == "contemporary", paste0(school, "_con"), school)) %>%
+  group_by(period, school) %>%
+  summarize(ave_word = round(mean(word_length),1), .groups = "drop") %>%
+  ggplot(aes(x = reorder(school, ave_word), y=ave_word))+
+  geom_bar(aes(fill = period), stat="identity")+
+  labs(title="The average sentence length of different schools in different periods", x= "School", 
+    y= "Average number of words")+
+  geom_text(aes(label=ave_word), hjust=0.5, vjust = 1.5,color="white", size=3) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  scale_fill_brewer()
+
+len_school_evolve
+```
+
+## 2. Main topics that philosophers discuss in different periods
+
+Now we are interested in how the topics evolved with the time, we want to discover the most frequent used words in different periods. We will present via the wordcloud.
+
+**Ancient**: `time`, `nature`, `people`, `animals`, `body`, `soul` and so on.
+
+```{r, message=FALSE, warning=FALSE, fig.align='center'}
+corpus_ancient <- VCorpus(VectorSource(ancient_data$sentence_str)) %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, character(0)) %>%
+  tm_map(removeWords, stop_words$word) %>%
+  tm_map(stripWhitespace)
+
+tdm_ancient <- corpus_ancient %>%
+  TermDocumentMatrix() %>%
+  tidy() %>%
+  group_by(term) %>%
+  summarize(sum(count))
+
+wordcloud(tdm_ancient$term, tdm_ancient$`sum(count)`,
+          scale=c(4,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+```
+
+**Modern**: `reason`, `mind`, `ideas`, `nature`, `law`, `power` and so on.
+ 
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+corpus_modern <- VCorpus(VectorSource(modern_data$sentence_str)) %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, character(0)) %>%
+  tm_map(removeWords, stop_words$word) %>%
+  tm_map(stripWhitespace)
+
+tdm_modern <- corpus_modern %>%
+  TermDocumentMatrix() %>%
+  tidy() %>%
+  group_by(term) %>%
+  summarize(sum(count))
+
+wordcloud(tdm_modern$term, tdm_modern$`sum(count)`,
+          scale=c(4,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+```
+
+**Contemporary**: `world`, `form`, `sense`, `truth`, `consciousness`, `labour` and so on.
+
+```{r message=FALSE, warning=FALSE, fig.align='center'}
+corpus_contemporary <- VCorpus(VectorSource(contemporary_data$sentence_str)) %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, character(0)) %>%
+  tm_map(removeWords, stop_words$word) %>%
+  tm_map(stripWhitespace)
+
+tdm_contemporary <- corpus_contemporary %>%
+  TermDocumentMatrix() %>%
+  tidy() %>%
+  group_by(term) %>%
+  summarize(sum(count))
+
+wordcloud(tdm_contemporary$term, tdm_contemporary$`sum(count)`,
+          scale=c(4,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+```
+
+We can conclude that the topics really differ a lot in 3 periods. Ancient philosophy focuses more on **nature-related** things like water, time, animals and so on. Modern philosophy focuses more on **reasoning-related** things like mind, ideas, object, concept and so on. As for contemporary philosophy, the topics are more **realistic-related** including world, form, sense, knowledge, existence and so on.
+
+
+## 3. Sentimental changes in differnt times
+
+What are the sentiment implication of different schools in different times? Are they positive or negative? What is the reason of those sentiment patterns? Next we may explore deeply into these questions.
+
+Using the Bing Liu lexicons, we assign each word `positive` and `negative` tag, then count the number of positive or negative words in every 80 sentences, and finally compute the sentiment score with positive number minus negative number. 
+
+Final results are shown as below. We can see some extremely negative schools like `continental` or extremely positive schools like `capitalism`, `plato` and so on.
+
+```{r, message=FALSE, fig.align='center'}
+school_unnest <- data_new2 %>%
+  select(school, sentence_str) %>%
+  group_by(school) %>%
+  mutate(linenumber = row_number()) %>%
+  ungroup() %>%
+  unnest_tokens(word, sentence_str) 
+
+school_sentiment <- school_unnest %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(school, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+sen_school <- ggplot(school_sentiment, aes(index, sentiment)) +
+  geom_col(show.legend = FALSE, fill = color2[7]) +
+  facet_wrap(~ school, ncol = 5, scales = "free_x")
+
+sen_school
+```
+
+How about the sentiment patterns in different periods? Withe the same method, the pattern is shown below.
+Conclusion is that somehow the sentiment of philosophy evolves from positive to negative. The trend can be more precise if we split the time span into more trivial periods. This patter may result from 
+
+```{r, fig.align='center'}
+period_unnest <- data_new2 %>%
+  select(school, author, period, sentence_str) %>%
+  group_by(period) %>%
+  mutate(linenumber = row_number()) %>%
+  ungroup() %>%
+  unnest_tokens(word, sentence_str)
+  
+period_sentiment <- period_unnest %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(period, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+sen_period <- ggplot(period_sentiment, aes(index, sentiment)) +
+  geom_col(show.legend = FALSE, fill = color2[7]) +
+  facet_wrap(~ period, ncol = 5, scales = "free_x")
+
+sen_period
+
+```
+
+As we have discovered the macro pattern of sentiment evolution, let's loot at the detailed sentences which lead to those positive or negative impression. Since the contemporary period is more negative than the periods before, let's look at the top 5 negative sentences in this period.
+
+```{r}
+period_sen_byline <- period_unnest %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(period, linenumber, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+data_new2 %>%
+  filter(period == "contemporary") %>%
+  filter(row_number() %in% (period_sen_byline %>%
+                           filter(period == "contemporary") %>%
+                           arrange(sentiment) %>%
+                           head(5) %>% select(linenumber))[[1]]) %>%
+  select(sentence_str, school)
+```
+
+Also, top 5 positive sentences in modern times.
+
+```{r}
+data_new2 %>%
+  filter(period == "modern") %>%
+  filter(row_number() %in% (period_sen_byline %>%
+                           filter(period == "modern") %>%
+                           arrange(desc(sentiment)) %>%
+                           head(5) %>% select(linenumber))[[1]]) %>%
+  select(sentence_str, school)
+```
+
+The emotions are really strong when we read these sentences. We can also find that top5 negative sentences of contemporary period are from `continental` and `feminism` and top5 positive sentences are from `rationalism`and `german_idealism`.
+
+Except from Bing lexicon, we can also use NCR lexicon to analyze the sentiment of philosophy. The result is as below. We cannot really say that there is a huge difference between each period.
+
+```{r, fig.align='center'}
+nre_sentiments <- get_sentiments("nrc") %>%
+  filter(sentiment != "negative" & sentiment != "positive")
+
+period_emotion <- period_unnest %>%
+  inner_join(nre_sentiments, by = "word") %>%
+  select(period, emotion = sentiment)
+
+emo_period <- ggplot(period_emotion) +
+  geom_bar(aes(x = period, fill = emotion), position = "fill") +
+  scale_fill_brewer()
+
+emo_period
+```
+
+
+# Step 4: Conclusion
+In this project, we explore the evolution of philosophy, the main conclusions are as below:
+
+- The philosophy schools are more diversified as the time went by
+- As for sentence length, generally the whole pattern changes from simplicity to complexity and finally returns to simplicity.
+- Ancient philosophy focuses more on **nature-related** things, modern philosophy focuses more on **reasoning-related** things, contemporary philosophy focuses more on**realistic-related** things
+- The whole sentiment of philosophy evolves from positive to negative.
+
+More research can be done afterwards like sentiment clustering, topics modeling and so on to discover more patterns in the evolution of philosophy.
+
